@@ -1,33 +1,34 @@
-name: WPS 自动签到
+name: WPS 自动邀请
 
 on:
+  # 每天北京时间 8:00 执行（UTC 0:00）
   schedule:
-    # 每天早上 8:00 (北京时间) 执行
-    # UTC+8 = 8:00, UTC = 0:00
-    - cron: "0 0 * * *"
+    - cron: '0 0 * * *'
   # 支持手动触发
   workflow_dispatch:
 
 jobs:
-  wps-signin:
+  signin:
     runs-on: ubuntu-latest
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置 Python
+      - name: 安装 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: 安装依赖
-        run: pip install requests --break-system-packages
+        run: pip install requests
 
-      - name: 执行 WPS 签到
+      - name: 执行邀请脚本
         env:
           WPS_SID: ${{ secrets.WPS_SID }}
           WPS_INVITE_USERID: ${{ secrets.WPS_INVITE_USERID }}
+          WPS_INVITE_SIDS: ${{ secrets.WPS_INVITE_SIDS }}
+          ENABLE_CLOCK_IN: ${{ secrets.ENABLE_CLOCK_IN }}
+          ENABLE_DOCER_CHECKIN: ${{ secrets.ENABLE_DOCER_CHECKIN }}
           SERVER_CHAN_KEY: ${{ secrets.SERVER_CHAN_KEY }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}

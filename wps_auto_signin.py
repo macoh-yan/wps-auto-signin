@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-WPS 会员自动签到 & 邀请脚本
+WPS 会员自动邀请脚本
 =================================
 功能：
-  1. 自动签到打卡（可能受 client_code 限制）
-  2. 自动邀请好友（每日最多 10 人，邀请成功后额外获得会员天数）
-  3. 支持 Server酱 / 企业微信 / 钉钉 通知推送
+  1. 自动邀请好友（每日最多 10 人，邀请成功后额外获得会员天数）
+  2. 可选：签到打卡（受 client_code / captcha 限制，默认跳过）
+  3. 可选：稻壳签到（受网络/风控限制，默认跳过）
+  4. 支持 Server酱 / 企业微信 / 钉钉 通知推送
 
 使用方式：
   1. 填写下方 CONFIG 配置区
@@ -35,6 +36,12 @@ CONFIG = {
 
     # 你的 WPS 用户 ID（纯数字，如 191641526）
     "invite_userid": int(os.environ.get("WPS_INVITE_USERID", "0")),
+
+    # ---------- 功能开关 ----------
+    # WPS 签到：因 WPS 增加 captcha/client_code 验证，API 方式已失效，默认关闭
+    "enable_clock_in": os.environ.get("ENABLE_CLOCK_IN", "").lower() in ("1", "true", "yes"),
+    # 稻壳签到：可能因网络/风控失败，默认关闭
+    "enable_docer_checkin": os.environ.get("ENABLE_DOCER_CHECKIN", "").lower() in ("1", "true", "yes"),
 
     # ---------- 预置小号 sid（用于接受邀请）----------
     # 每个小号每天只能被邀请一次，建议间隔 >= 2 秒
@@ -107,7 +114,7 @@ def sign_up(sid):
             API["sign_up"],
             params={"member": "wps"},
             headers=make_headers(sid),
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         log(f"[报名] {data}")
@@ -124,7 +131,7 @@ def get_question(sid):
             API["get_question"],
             params={"member": "wps"},
             headers=make_headers(sid),
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         log(f"[问题] {data}")
@@ -160,7 +167,7 @@ def answer_question(sid, question):
                 params={"member": "wps"},
                 headers=make_headers(sid),
                 data={"answer": str(answer_num)},
-                timeout=15,
+                timeout=30,
             )
             data = resp.json()
             log(f"[答题] 尝试选项 {answer_num}: {data}")
@@ -184,7 +191,7 @@ def do_clock_in(sid):
             API["clock_in"],
             params={"member": "wps"},
             headers=make_headers(sid),
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         log(f"[签到] {data}")
@@ -244,7 +251,7 @@ def docer_checkin(sid):
         resp = requests.get(
             API["base_info"],
             headers=make_headers(sid),
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         log(f"[稻壳-信息] {data}")
@@ -256,7 +263,7 @@ def docer_checkin(sid):
             API["docer_checkin"],
             headers=make_headers(sid),
             json={"is_question": 0},
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         log(f"[稻壳-签到] {data}")
@@ -284,7 +291,7 @@ def invite_user(inviter_sid, invite_userid):
             API["invite"],
             headers=make_headers(inviter_sid),
             json=payload,
-            timeout=15,
+            timeout=30,
         )
         data = resp.json()
         return data
@@ -422,13 +429,19 @@ def main():
         "invite_fail": 0,
     }
 
-    # 1. 签到
-    results["clock_in"] = wps_clock_in(sid)
-    time.sleep(2)
+    # 1. 签到（默认跳过，因 captcha/client_code 限制）
+    if CONFIG["enable_clock_in"]:
+        results["clock_in"] = wps_clock_in(sid)
+        time.sleep(2)
+    else:
+        log("[跳过] WPS 签到（未开启，请每日手动在小程序签到）", "warn")
 
-    # 2. 稻壳签到
-    results["docer_checkin"] = docer_checkin(sid)
-    time.sleep(2)
+    # 2. 稻壳签到（默认跳过）
+    if CONFIG["enable_docer_checkin"]:
+        results["docer_checkin"] = docer_checkin(sid)
+        time.sleep(2)
+    else:
+        log("[跳过] 稻壳签到（未开启）", "warn")
 
     # 3. 邀请好友
     if invite_userid and invite_userid != 0:
@@ -447,14 +460,14 @@ def main():
     log("=" * 50)
 
     # 5. 发送通知
-    title = (
-        f"WPS 签到 {'成功' if results['clock_in'] else '请检查'}"
-        f" | 邀请 +{results['invite_success']}"
-    )
+    clock_in_status = "✅ 成功" if results['clock_in'] else ("⏭️ 跳过" if not CONFIG["enable_clock_in"] else "❌ 失败")
+    docer_status = "✅ 成功" if results['docer_checkin'] else ("⏭️ 跳过" if not CONFIG["enable_docer_checkin"] else "❌ 失败")
+
+    title = f"WPS 邀请 +{results['invite_success']} | 签到 {clock_in_status.replace('✅ ', '').replace('⏭️ ', '').replace('❌ ', '')}"
     content = "\n".join([
-        f"签到: {'✅ 成功' if results['clock_in'] else '❌ 失败'}",
-        f"稻壳签到: {'✅ 成功' if results['docer_checkin'] else '❌ 失败'}",
         f"邀请: 成功 {results['invite_success']}, 失败 {results['invite_fail']}",
+        f"签到: {clock_in_status}",
+        f"稻壳签到: {docer_status}",
         "",
         "---",
         get_log_text(),
