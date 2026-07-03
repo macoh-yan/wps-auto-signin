@@ -23,7 +23,10 @@ import time
 import random
 import hashlib
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# 北京时间（UTC+8），GitHub Actions 默认为 UTC 时区
+BJ_TIME = timezone(timedelta(hours=8))
 
 # ============================================================
 # 配置区 - 请修改以下配置
@@ -352,12 +355,24 @@ def send_notification(title, content):
     # 企业微信
     if CONFIG["wecom_webhook"]:
         try:
-            payload = {
-                "msgtype": "markdown",
-                "markdown": {"content": f"## {title}\n{content}"},
-            }
-            resp = requests.post(CONFIG["wecom_webhook"], json=payload, timeout=10)
-            results.append(f"企业微信: {resp.status_code}")
+            webhook = CONFIG["wecom_webhook"]
+            # 校验 URL 格式
+            if not webhook.startswith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="):
+                log(f"[企业微信] Webhook URL 格式异常: {webhook[:50]}...", "warn")
+                log("[企业微信] 正确格式应为: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxx", "warn")
+                results.append("企业微信失败: URL格式错误")
+            else:
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {"content": f"## {title}\n{content}"},
+                }
+                resp = requests.post(webhook, json=payload, timeout=10)
+                resp_text = resp.text
+                if resp.status_code == 200 and '"errcode":0' in resp_text:
+                    results.append("企业微信: 成功")
+                else:
+                    log(f"[企业微信] HTTP {resp.status_code} 响应: {resp_text}", "error")
+                    results.append(f"企业微信失败: HTTP {resp.status_code}")
         except Exception as e:
             results.append(f"企业微信失败: {e}")
 
@@ -369,7 +384,12 @@ def send_notification(title, content):
                 "markdown": {"title": title, "text": f"## {title}\n{content}"},
             }
             resp = requests.post(CONFIG["dingtalk_webhook"], json=payload, timeout=10)
-            results.append(f"钉钉: {resp.status_code}")
+            resp_text = resp.text
+            if resp.status_code == 200 and '"errcode":0' in resp_text:
+                results.append("钉钉: 成功")
+            else:
+                log(f"[钉钉] HTTP {resp.status_code} 响应: {resp_text}", "error")
+                results.append(f"钉钉失败: HTTP {resp.status_code}")
         except Exception as e:
             results.append(f"钉钉失败: {e}")
 
@@ -384,8 +404,8 @@ def send_notification(title, content):
 # ============================================================
 
 def log(msg, level="info"):
-    """带时间戳的日志输出"""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """带时间戳的日志输出（北京时间）"""
+    now = datetime.now(BJ_TIME).strftime("%Y-%m-%d %H:%M:%S")
     prefix = {"info": "ℹ", "success": "✅", "error": "❌", "warn": "⚠️"}.get(level, "ℹ")
     print(f"[{now}] {prefix} {msg}")
 
@@ -411,7 +431,7 @@ def main():
 
     log("=" * 50)
     log("WPS 自动签到脚本启动")
-    log(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log(f"时间: {datetime.now(BJ_TIME).strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
     log("=" * 50)
 
     sid = CONFIG["wps_sid"]
